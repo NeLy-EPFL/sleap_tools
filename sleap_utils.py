@@ -6,6 +6,8 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 
+from concurrent.futures import ThreadPoolExecutor
+
 
 class Sleap_Tracks:
     """Class for handling SLEAP tracking data. It is a wrapper around the SLEAP H5 file format."""
@@ -33,6 +35,15 @@ class Sleap_Tracks:
         self.dataset = self.generate_tracks_data()
 
         self.video = self.h5file["video_path"][()].decode("utf-8")
+
+        # Try to load the video file to check its accessibility
+        try:
+            cap = cv2.VideoCapture(self.video)
+            cap.release()
+        except:
+            print(
+                f"Video file not available: {self.video}. Check path and server access."
+            )
 
         for node in self.node_names:
             setattr(self.__class__, node, property(self._create_node_property(node)))
@@ -102,26 +113,20 @@ class Sleap_Tracks:
     def generate_annotated_frame(
         self,
         frame,
-        save=False,
-        output_path=None,
         nodes=None,
         labels=False,
         edges=True,
-        display=True,
     ):
-        """Generates a DataFrame with the tracking data for a specific frame and annotates the frame image.
+        """Generates an annotated frame image for a specific frame.
 
         Args:
             frame (int): Frame number.
-            save (bool): Whether to save the annotated frame to a file. Defaults to False.
-            output_path (str): Path to save the annotated frame if save is True. Defaults to None.
             nodes (str or list of str): Node name or list of node names to annotate. Defaults to all nodes.
             labels (bool): Whether to display labels on the nodes. Defaults to False.
             edges (bool): Whether to draw edges between nodes. Defaults to True.
-            display (bool): Whether to display the annotated frame. Defaults to True.
 
         Returns:
-            DataFrame: DataFrame with the tracking data for the given frame.
+            np.ndarray: Annotated frame image.
         """
 
         # Get the tracking data for the specified frame
@@ -179,16 +184,6 @@ class Sleap_Tracks:
                         cv2.line(img, (x1, y1), (x2, y2), (0, 255, 255), 1)
 
         cap.release()
-
-        if save:
-            if output_path is None:
-                raise ValueError("Output path must be specified if save is True")
-            cv2.imwrite(output_path, img)
-        elif display:
-            plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-            plt.axis("off")
-            plt.show()
-
         return img
 
     def generate_annotated_video(
@@ -234,16 +229,18 @@ class Sleap_Tracks:
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
-        for frame in range(start, end + 1):
-            annotated_frame = self.generate_annotated_frame(
+        def process_frame(frame):
+            return self.generate_annotated_frame(
                 frame,
-                save=False,
                 nodes=nodes,
                 labels=labels,
                 edges=edges,
-                display=False,
             )
 
+        with ThreadPoolExecutor() as executor:
+            annotated_frames = list(executor.map(process_frame, range(start, end + 1)))
+
+        for annotated_frame in annotated_frames:
             if save:
                 out.write(annotated_frame)
             else:
