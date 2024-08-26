@@ -12,6 +12,34 @@ from concurrent.futures import ThreadPoolExecutor
 class Sleap_Tracks:
     """Class for handling SLEAP tracking data. It is a wrapper around the SLEAP H5 file format."""
 
+    class Animal:
+        """Nested class to represent an animal with node properties."""
+
+        def __init__(self, animal_data, node_names):
+            self.node_names = node_names
+            self.animal_data = animal_data
+
+            for node in node_names:
+                setattr(self, node, self._create_node_property(node))
+
+        def _create_node_property(self, node):
+            """Creates a property for a node to access its x and y coordinates for each frame.
+
+            Args:
+                node (str): The name of the node.
+
+            Returns:
+                property: A property for the node coordinates.
+            """
+
+            @property
+            def node_property(self):
+                x_values = self.animal_data[f"x_{node}"].values
+                y_values = self.animal_data[f"y_{node}"].values
+                return list(zip(x_values, y_values))
+
+            return node_property
+
     def __init__(self, filename):
         """Initialize the Sleap_Track object with the given SLEAP tracking file.
 
@@ -45,8 +73,11 @@ class Sleap_Tracks:
                 f"Video file not available: {self.video}. Check path and server access."
             )
 
-        for node in self.node_names:
-            setattr(self.__class__, node, property(self._create_node_property(node)))
+        # Create animal properties
+        self.animals = []
+        for i in range(len(self.tracks)):
+            animal_data = self.dataset[self.dataset["animal"] == f"animal_{i+1}"]
+            self.animals.append(self.Animal(animal_data, self.node_names))
 
         print(f"Loaded SLEAP tracking file: {filename}")
         print(f"N° of animals: {len(self.tracks)}")
@@ -92,23 +123,6 @@ class Sleap_Tracks:
         df = pd.concat(df_list, ignore_index=True)
 
         return df
-
-    def _create_node_property(self, node):
-        """Creates a property for a node to access its x and y coordinates for each frame.
-
-        Args:
-            node (str): The name of the node.
-
-        Returns:
-            function: A getter function for the node property.
-        """
-
-        def node_property(self):
-            x_values = self.dataset[f"x_{node}"].values
-            y_values = self.dataset[f"y_{node}"].values
-            return list(zip(x_values, y_values))
-
-        return node_property
 
     def generate_annotated_frame(
         self,
