@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
@@ -55,7 +56,7 @@ def apply_arena_mask(frame, mask):
     masked_frame = cv2.bitwise_and(frame, frame, mask=mask)
 
     # Crop 10 pixels from top and bottom
-    cropped_frame = masked_frame[5:-5, :]
+    cropped_frame = masked_frame[6:-6, :]
 
     # Add 10 pixels of black padding to the left and right
     padded_frame = cv2.copyMakeBorder(
@@ -69,7 +70,7 @@ def preprocess_frame(frame, mask, width, height):
     """Preprocess the frame by resizing, equalizing histogram, and applying mask."""
     resized_frame = resize_frame(frame, width, height)
     equalized_frame = equalize_histogram(resized_frame)
-    final_frame = apply_arena_mask(resized_frame, mask)
+    final_frame = apply_arena_mask(equalized_frame, mask)  # Fixed: should use equalized_frame
     return final_frame
 
 
@@ -78,8 +79,8 @@ def process_frame(frame, mask, width, height):
     return preprocess_frame(frame, mask, width, height)
 
 
-def process_video(input_path, output_path, template_width, template_height):
-    """Process the entire video and save the preprocessed video."""
+def process_video(input_path, output_dir, template_width, template_height):
+    """Process the entire video and save the preprocessed frames."""
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
         print(f"Error: Could not open video {input_path}.")
@@ -87,7 +88,6 @@ def process_video(input_path, output_path, template_width, template_height):
 
     try:
         # Get video properties
-        fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
         # Read the last frame to generate the mask
@@ -106,54 +106,66 @@ def process_video(input_path, output_path, template_width, template_height):
         # Reset the video capture to the first frame
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
-        # Define the codec and create VideoWriter object
-        fourcc = cv2.VideoWriter_fourcc(*"XVID")
-        out = cv2.VideoWriter(
-            output_path,
-            fourcc,
-            fps,
-            (template_width + 40, template_height - 10),
-            isColor=False,
-        )
+        # Ensure output directory exists
+        os.makedirs(output_dir, exist_ok=True)
 
         # Process frames with multithreading and progress bar
         with ThreadPoolExecutor() as executor:
             futures = []
-            for _ in range(total_frames):
+            for frame_idx in range(total_frames):
                 ret, frame = cap.read()
                 if not ret:
+                    print(f"Error: Could not read frame {frame_idx}.")
                     break
-                futures.append(
-                    executor.submit(
-                        process_frame,
-                        frame,
-                        arena_mask,
-                        template_width,
-                        template_height,
-                    )
+                future = executor.submit(
+                    process_frame,
+                    frame,
+                    arena_mask,
+                    template_width,
+                    template_height,
                 )
+                futures.append((frame_idx, future))
 
-            for future in tqdm(
-                as_completed(futures), total=total_frames, desc="Processing frames"
+            for frame_idx, future in tqdm(
+                futures, total=total_frames, desc="Processing frames"
             ):
                 preprocessed_frame = future.result()
-                out.write(preprocessed_frame)
+                if preprocessed_frame is None:
+                    print(f"Warning: Preprocessed frame {frame_idx} is None.")
+                    continue
+                frame_filename = os.path.join(output_dir, f"frame_{frame_idx:06d}.png")
+                cv2.imwrite(frame_filename, preprocessed_frame)
 
-        print(f"Preprocessed video saved to: {output_path}")
+        print(f"Preprocessed frames saved to: {output_dir}")
 
     finally:
         # Release resources
         cap.release()
-        out.release()
 
 
 # Template size
-template_width = 95
-template_height = 515
+template_width = 96
+template_height = 516
 
-# Input and output video paths
+# Input video path and output directory
 input_video_path = "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231129_TNT_Fine_3_Videos_Tracked/arena4/corridor2/corridor2.mp4"
-output_video_path = "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231129_TNT_Fine_3_Videos_Tracked/arena4/corridor2/corridor2_preprocessed.mp4"
+output_frames_dir = "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231129_TNT_Fine_3_Videos_Tracked/arena4/corridor2/frames"
 
 # Process the video
-process_video(input_video_path, output_video_path, template_width, template_height)
+process_video(input_video_path, output_frames_dir, template_width, template_height)
+
+print(f"Preprocessing complete for video: {input_video_path}")
+
+# Assemble the frames into a video with a ffmpeg command
+ffmpeg_command = (
+    f"ffmpeg -y -r 29 -pattern_type glob -i '{output_frames_dir}/*.png' "
+    f"-c:v libx264 -vf fps=29 -pix_fmt yuv420p {output_frames_dir}/output.mp4"
+)
+ffmpeg_result = os.system(ffmpeg_command)
+
+# Check if FFmpeg command was successful before removing frames
+if ffmpeg_result == 0:
+    print("Video assembled successfully.")
+    os.system(f"rm -r {output_frames_dir}")
+else:
+    print("Error assembling video. Frames not removed.")

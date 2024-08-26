@@ -80,7 +80,10 @@ def main():
         sleap_tracks = Sleap_Tracks(h5_file)
         output_file = None
         if args.save and args.output_path:
-            output_file = output_dir / f"{video.stem}_annotated.mp4"
+            grandgrandparent = video.parents[2].name
+            grandparent = video.parents[1].name
+            parent = video.parents[0].name
+            output_file = output_dir / f"{grandgrandparent}_{grandparent}_{parent}_annotated.mp4"
         sleap_tracks.generate_annotated_video(
             save=args.save,
             output_path=str(output_file) if output_file else None,
