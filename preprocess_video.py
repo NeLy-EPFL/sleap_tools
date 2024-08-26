@@ -50,10 +50,14 @@ def create_arena_mask(binary_frame):
     return mask
 
 
-def apply_arena_mask(frame, mask):
+def apply_arena_mask(frame, mask, dilation_iterations=2):
     """Apply the arena mask to the frame and crop/pad the result."""
-    # Apply the mask to the frame
-    masked_frame = cv2.bitwise_and(frame, frame, mask=mask)
+    # Dilate the mask to make it slightly larger
+    kernel = np.ones((5, 5), np.uint8)  # Adjust the kernel size as needed
+    dilated_mask = cv2.dilate(mask, kernel, iterations=dilation_iterations)
+
+    # Apply the dilated mask to the frame
+    masked_frame = cv2.bitwise_and(frame, frame, mask=dilated_mask)
 
     # Crop 10 pixels from top and bottom
     cropped_frame = masked_frame[6:-6, :]
@@ -70,7 +74,7 @@ def preprocess_frame(frame, mask, width, height):
     """Preprocess the frame by resizing, equalizing histogram, and applying mask."""
     resized_frame = resize_frame(frame, width, height)
     equalized_frame = equalize_histogram(resized_frame)
-    final_frame = apply_arena_mask(equalized_frame, mask)  # Fixed: should use equalized_frame
+    final_frame = apply_arena_mask(equalized_frame, mask)
     return final_frame
 
 
@@ -79,7 +83,9 @@ def process_frame(frame, mask, width, height):
     return preprocess_frame(frame, mask, width, height)
 
 
-def process_video(input_path, output_dir, template_width, template_height):
+def process_video(
+    input_path, output_path, template_width, template_height, sample_frames=None
+):
     """Process the entire video and save the preprocessed frames."""
     cap = cv2.VideoCapture(input_path)
     if not cap.isOpened():
@@ -89,6 +95,8 @@ def process_video(input_path, output_dir, template_width, template_height):
     try:
         # Get video properties
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if sample_frames:
+            total_frames = min(total_frames, sample_frames)
 
         # Read the last frame to generate the mask
         cap.set(cv2.CAP_PROP_POS_FRAMES, total_frames - 1)
@@ -107,10 +115,11 @@ def process_video(input_path, output_dir, template_width, template_height):
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
         # Ensure output directory exists
+        output_dir = os.path.dirname(output_path)
         os.makedirs(output_dir, exist_ok=True)
 
         # Process frames with multithreading and progress bar
-        with ThreadPoolExecutor() as executor:
+        with ThreadPoolExecutor(max_workers=8) as executor:
             futures = []
             for frame_idx in range(total_frames):
                 ret, frame = cap.read()
@@ -138,34 +147,63 @@ def process_video(input_path, output_dir, template_width, template_height):
 
         print(f"Preprocessed frames saved to: {output_dir}")
 
+        # Assemble the frames into a video with a ffmpeg command
+        ffmpeg_command = (
+            f"ffmpeg -y -r 29 -pattern_type glob -i '{output_dir}/*.png' "
+            f"-c:v libx264 -vf fps=29 -pix_fmt yuv420p {output_path}"
+        )
+        ffmpeg_result = os.system(ffmpeg_command)
+
+        # Check if FFmpeg command was successful before removing frames
+        if ffmpeg_result == 0:
+            print(f"Video assembled successfully: {output_path}")
+            os.system(f"rm -r {output_dir}")
+        else:
+            print("Error assembling video. Frames not removed.")
+
     finally:
         # Release resources
         cap.release()
+
+
+def process_all_videos(
+    input_dir, output_dir, template_width, template_height, sample_frames=None
+):
+    """Process all videos in the input directory and its subdirectories."""
+    for root, _, files in os.walk(input_dir):
+        for file in files:
+            if file.endswith(".mp4"):
+                input_path = os.path.join(root, file)
+                relative_path = os.path.relpath(input_path, input_dir)
+                output_path = os.path.join(output_dir, relative_path)
+                output_path = output_path.replace(".mp4", "preprocessed.mp4")
+                process_video(
+                    input_path,
+                    output_path,
+                    template_width,
+                    template_height,
+                    sample_frames,
+                )
 
 
 # Template size
 template_width = 96
 template_height = 516
 
-# Input video path and output directory
-input_video_path = "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231129_TNT_Fine_3_Videos_Tracked/arena4/corridor2/corridor2.mp4"
-output_frames_dir = "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231129_TNT_Fine_3_Videos_Tracked/arena4/corridor2/frames"
-
-# Process the video
-process_video(input_video_path, output_frames_dir, template_width, template_height)
-
-print(f"Preprocessing complete for video: {input_video_path}")
-
-# Assemble the frames into a video with a ffmpeg command
-ffmpeg_command = (
-    f"ffmpeg -y -r 29 -pattern_type glob -i '{output_frames_dir}/*.png' "
-    f"-c:v libx264 -vf fps=29 -pix_fmt yuv420p {output_frames_dir}/output.mp4"
+# Input and output directories
+input_directory = (
+    "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231129_TNT_Fine_3_Videos_Tracked"
 )
-ffmpeg_result = os.system(ffmpeg_command)
+output_directory = "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231129_TNT_Fine_3_Videos_Tracked_Preprocessed"
 
-# Check if FFmpeg command was successful before removing frames
-if ffmpeg_result == 0:
-    print("Video assembled successfully.")
-    os.system(f"rm -r {output_frames_dir}")
-else:
-    print("Error assembling video. Frames not removed.")
+# Number of frames to process for the sample video (set to None to process the entire video)
+sample_frames = (
+    20 * 29
+)  # Change this value to the desired number of sample frames or None
+
+# Process all videos in the input directory
+process_all_videos(
+    input_directory, output_directory, template_width, template_height, sample_frames
+)
+
+print(f"Preprocessing complete for all videos in: {input_directory}")
