@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import os
+import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
@@ -59,10 +60,10 @@ def apply_arena_mask(frame, mask, dilation_iterations=2):
     # Apply the dilated mask to the frame
     masked_frame = cv2.bitwise_and(frame, frame, mask=dilated_mask)
 
-    # Crop 10 pixels from top and bottom
+    # Crop 6 pixels from top and bottom
     cropped_frame = masked_frame[6:-6, :]
 
-    # Add 10 pixels of black padding to the left and right
+    # Add 20 pixels of black padding to the left and right
     padded_frame = cv2.copyMakeBorder(
         cropped_frame, 0, 0, 20, 20, cv2.BORDER_CONSTANT, value=[0, 0, 0]
     )
@@ -73,8 +74,8 @@ def apply_arena_mask(frame, mask, dilation_iterations=2):
 def preprocess_frame(frame, mask, width, height):
     """Preprocess the frame by resizing, equalizing histogram, and applying mask."""
     resized_frame = resize_frame(frame, width, height)
-    equalized_frame = equalize_histogram(resized_frame)
-    final_frame = apply_arena_mask(equalized_frame, mask)
+    #equalized_frame = equalize_histogram(resized_frame)
+    final_frame = apply_arena_mask(resized_frame, mask)
     return final_frame
 
 
@@ -107,15 +108,16 @@ def process_video(
 
         # Preprocess the last frame to generate the mask
         resized_last_frame = resize_frame(last_frame, template_width, template_height)
-        equalized_last_frame = equalize_histogram(resized_last_frame)
-        binary_last_frame = binarise(equalized_last_frame)
+        binary_last_frame = binarise(resized_last_frame)
         arena_mask = create_arena_mask(binary_last_frame)
 
         # Reset the video capture to the first frame
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
         # Ensure output directory exists
-        output_dir = os.path.dirname(output_path)
+        output_dir = os.path.join(
+            os.path.dirname(output_path), "frames", os.path.basename(output_path).split('.')[0]
+        )
         os.makedirs(output_dir, exist_ok=True)
 
         # Process frames with multithreading and progress bar
@@ -147,9 +149,9 @@ def process_video(
 
         print(f"Preprocessed frames saved to: {output_dir}")
 
-        # Assemble the frames into a video with a ffmpeg command
+        # Assemble the frames into a video with an ffmpeg command
         ffmpeg_command = (
-            f"ffmpeg -y -r 29 -pattern_type glob -i '{output_dir}/*.png' "
+            f"ffmpeg -y -r 29 -i '{output_dir}/frame_%06d.png' "
             f"-c:v libx264 -vf fps=29 -pix_fmt yuv420p {output_path}"
         )
         ffmpeg_result = os.system(ffmpeg_command)
@@ -157,7 +159,7 @@ def process_video(
         # Check if FFmpeg command was successful before removing frames
         if ffmpeg_result == 0:
             print(f"Video assembled successfully: {output_path}")
-            os.system(f"rm -r {output_dir}")
+            shutil.rmtree(output_dir)  # Remove the entire frames directory
         else:
             print("Error assembling video. Frames not removed.")
 
@@ -176,7 +178,7 @@ def process_all_videos(
                 input_path = os.path.join(root, file)
                 relative_path = os.path.relpath(input_path, input_dir)
                 output_path = os.path.join(output_dir, relative_path)
-                output_path = output_path.replace(".mp4", "preprocessed.mp4")
+                output_path = output_path.replace(".mp4", "_preprocessed.mp4")
                 process_video(
                     input_path,
                     output_path,
@@ -192,14 +194,16 @@ template_height = 516
 
 # Input and output directories
 input_directory = (
-    "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231129_TNT_Fine_3_Videos_Tracked"
+    "/mnt/upramdya_data/_Tracking_models/Sleap/mazerecorder/FlyTracking/FullBody/231129_TNT_Fine_2_Videos_Tracked"
 )
-output_directory = "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231129_TNT_Fine_3_Videos_Tracked_Preprocessed"
+output_directory = "/mnt/upramdya_data/_Tracking_models/Sleap/mazerecorder/FlyTracking/FullBody/231129_TNT_Fine_2_Videos_Tracked_Preprocessed"
 
 # Number of frames to process for the sample video (set to None to process the entire video)
-sample_frames = (
-    20 * 29
-)  # Change this value to the desired number of sample frames or None
+sample_frames = None
+
+# (
+#     20 * 29
+# )  # Change this value to the desired number of sample frames or None
 
 # Process all videos in the input directory
 process_all_videos(
@@ -207,3 +211,4 @@ process_all_videos(
 )
 
 print(f"Preprocessing complete for all videos in: {input_directory}")
+
