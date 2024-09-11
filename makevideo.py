@@ -38,7 +38,10 @@ def main():
 
     args = parser.parse_args()
 
+    print(f"Arguments: {args}")
+
     for filename in tqdm(args.filenames, desc="Processing files"):
+        print(f"Processing file: {filename}")
         sleap_tracks = Sleap_Tracks(filename)
         sleap_tracks.generate_annotated_video(
             save=args.save,

@@ -5,6 +5,7 @@ import pandas as pd
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
+from tqdm import tqdm
 
 from concurrent.futures import ThreadPoolExecutor
 
@@ -252,7 +253,13 @@ class Sleap_Tracks:
             )
 
         with ThreadPoolExecutor() as executor:
-            annotated_frames = list(executor.map(process_frame, range(start, end + 1)))
+            annotated_frames = list(
+                tqdm(
+                    executor.map(process_frame, range(start, end + 1)),
+                    total=end - start + 1,
+                    desc="Processing frames",
+                )
+            )
 
         for annotated_frame in annotated_frames:
             if save:

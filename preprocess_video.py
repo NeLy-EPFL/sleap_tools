@@ -209,18 +209,31 @@ def process_video(
 
 
 def process_all_videos(
-    input_dir, output_dir, template_width, template_height, sample_frames=None
+    input_dir,
+    output_dir,
+    template_width,
+    template_height,
+    sample_frames=None,
+    exclude_keywords=None,
 ):
     """Process all videos in the input directory and its subdirectories."""
+    if exclude_keywords is None:
+        exclude_keywords = []
+
     for input_path in Path(input_dir).rglob("*.mp4"):
-        # Skip files that are already preprocessed
-        if "_preprocessed" in input_path.stem:
-            print(f"Skipping preprocessed video: {input_path}")
+        # Skip files that are already preprocessed or contain exclude keywords
+        if any(keyword in input_path.stem for keyword in exclude_keywords):
+            print(f"Skipping video due to exclude keyword: {input_path}")
             continue
 
-        relative_path = input_path.relative_to(input_dir)
-        output_path = Path(output_dir) / relative_path
-        output_path = output_path.with_name(output_path.stem + "_preprocessed.mp4")
+        # Determine the output path
+        if output_dir:
+            # TODO: This doesn't look right. Should simply replace the input directory with the output directory.
+            relative_path = input_path.relative_to(input_dir)
+            output_path = Path(output_dir) / relative_path
+            output_path = output_path.with_name(output_path.stem + "_preprocessed.mp4")
+        else:
+            output_path = input_path.with_name(input_path.stem + "_preprocessed.mp4")
 
         print(f"Processing video: {input_path}")
         process_video(
@@ -231,14 +244,15 @@ def process_all_videos(
 
 def process_videos_in_directory(
     input_directory,
-    output_directory,
+    output_directory=None,
     template_width=96,
     template_height=516,
     sample_frames=None,
+    exclude_keywords=None,
 ):
     """Process all videos in the specified directory."""
     input_directory = Path(input_directory)
-    output_directory = Path(output_directory)
+    output_directory = Path(output_directory) if output_directory else None
 
     process_all_videos(
         input_directory,
@@ -246,6 +260,7 @@ def process_videos_in_directory(
         template_width,
         template_height,
         sample_frames,
+        exclude_keywords,
     )
 
     print(f"Preprocessing complete for all videos in: {input_directory}")
