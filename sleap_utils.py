@@ -3,11 +3,15 @@ import h5py
 import pandas as pd
 
 import cv2
-import matplotlib.pyplot as plt
+
+# import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
+from pathlib import Path
+
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 
 
 class Sleap_Tracks:
@@ -63,11 +67,11 @@ class Sleap_Tracks:
 
         self.dataset = self.generate_tracks_data()
 
-        self.video = self.h5file["video_path"][()].decode("utf-8")
+        self.video = Path(self.h5file["video_path"][()].decode("utf-8"))
 
         # Try to load the video file to check its accessibility
         try:
-            cap = cv2.VideoCapture(self.video)
+            cap = cv2.VideoCapture(str(self.video))
             cap.release()
         except:
             print(
@@ -125,52 +129,28 @@ class Sleap_Tracks:
 
         return df
 
-    def generate_annotated_frame(
-        self,
-        frame,
-        nodes=None,
-        labels=False,
-        edges=True,
-    ):
-        """Generates an annotated frame image for a specific frame.
-
-        Args:
-            frame (int): Frame number.
-            nodes (str or list of str): Node name or list of node names to annotate. Defaults to all nodes.
-            labels (bool): Whether to display labels on the nodes. Defaults to False.
-            edges (bool): Whether to draw edges between nodes. Defaults to True.
-
-        Returns:
-            np.ndarray: Annotated frame image.
-        """
-
-        # Get the tracking data for the specified frame
+    def generate_annotated_frame(self, frame, nodes=None, labels=False, edges=True):
+        """Generates an annotated frame image for a specific frame."""
         frame_data = self.dataset[self.dataset["frame"] == frame]
 
-        # Open the video file
-        cap = cv2.VideoCapture(self.video)
-        cap.set(
-            cv2.CAP_PROP_POS_FRAMES, frame - 1
-        )  # Frame numbers are 0-based in OpenCV
+        cap = cv2.VideoCapture(str(self.video))
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame - 1)
 
         ret, img = cap.read()
         if not ret:
             raise ValueError(f"Could not read frame {frame} from video {self.video}")
 
-        # Set nodes to all nodes if not specified
         if nodes is None:
             nodes = self.node_names
         elif isinstance(nodes, str):
             nodes = [nodes]
 
-        # Annotate the frame with tracking data
         for _, row in frame_data.iterrows():
             for node in nodes:
                 x = row[f"x_{node}"]
                 y = row[f"y_{node}"]
                 if not np.isnan(x) and not np.isnan(y):
-                    x = int(x)
-                    y = int(y)
+                    x, y = int(x), int(y)
                     cv2.circle(img, (x, y), 2, (0, 255, 255), -1)
                     if labels:
                         cv2.putText(
@@ -183,7 +163,7 @@ class Sleap_Tracks:
                             1,
                             cv2.LINE_AA,
                         )
-        # Draw edges if specified
+
         if edges:
             for edge in self.edge_names:
                 node1, node2 = edge
@@ -211,23 +191,9 @@ class Sleap_Tracks:
         labels=False,
         edges=True,
     ):
-        """Generates a video with annotated frames.
-
-        Args:
-            save (bool): Whether to save the annotated video to a file. Defaults to False.
-            output_path (str): Path to save the annotated video if save is True. Defaults to None.
-            start (int): Starting frame number. Defaults to None.
-            end (int): Ending frame number. Defaults to None.
-            nodes (str or list of str): Node name or list of node names to annotate. Defaults to all nodes.
-            labels (bool): Whether to display labels on the nodes. Defaults to False.
-            edges (bool): Whether to draw edges between nodes. Defaults to True.
-        """
-
-        # Open the video file
-        cap = cv2.VideoCapture(self.video)
+        cap = cv2.VideoCapture(str(self.video))
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-        # Determine the range of frames to process
         if start is None:
             start = 1
         if end is None:
@@ -235,21 +201,16 @@ class Sleap_Tracks:
 
         if save:
             if output_path is None:
-                raise ValueError("Output path must be specified if save is True")
-            # Get video properties
+                output_path = self.video.with_suffix(".annotated.mp4")
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             fps = cap.get(cv2.CAP_PROP_FPS)
-            # Define the codec and create VideoWriter object
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+            out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
 
         def process_frame(frame):
             return self.generate_annotated_frame(
-                frame,
-                nodes=nodes,
-                labels=labels,
-                edges=edges,
+                frame, nodes=nodes, labels=labels, edges=edges
             )
 
         with ThreadPoolExecutor() as executor:
@@ -266,6 +227,102 @@ class Sleap_Tracks:
                 out.write(annotated_frame)
             else:
                 cv2.imshow("Annotated Video", annotated_frame)
+                if cv2.waitKey(25) & 0xFF == ord("q"):
+                    break
+
+        cap.release()
+        if save:
+            out.release()
+        else:
+            cv2.destroyAllWindows()
+
+    def gpu_generate_annotated_video(
+        self,
+        save=False,
+        output_path=None,
+        start=None,
+        end=None,
+        nodes=None,
+        labels=False,
+        edges=True,
+    ):
+        """Generates a video with GPU-accelerated annotated frames."""
+
+        cap = cv2.VideoCapture(str(self.video))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        if start is None:
+            start = 1
+        if end is None:
+            end = total_frames
+
+        if save:
+            if output_path is None:
+                output_path = self.video.with_suffix(".annotated.mp4")
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+
+        while cap.isOpened():
+            ret, img = cap.read()
+            if not ret or cap.get(cv2.CAP_PROP_POS_FRAMES) > end:
+                break
+
+            # Upload frame to GPU
+            gpu_img = cv2.cuda_GpuMat()
+            gpu_img.upload(img)
+
+            frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+            frame_data = self.dataset[self.dataset["frame"] == frame]
+
+            if nodes is None:
+                nodes = self.node_names
+
+            # Annotate nodes and labels
+            for _, row in frame_data.iterrows():
+                for node in nodes:
+                    x = row[f"x_{node}"]
+                    y = row[f"y_{node}"]
+                    if not np.isnan(x) and not np.isnan(y):
+                        x, y = int(x), int(y)
+                        img = gpu_img.download()  # Download to CPU for annotations
+                        cv2.circle(img, (x, y), 2, (0, 255, 255), -1)
+                        if labels:
+                            cv2.putText(
+                                img,
+                                node,
+                                (x, y),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.5,
+                                (255, 255, 255),
+                                1,
+                                cv2.LINE_AA,
+                            )
+                        gpu_img.upload(img)  # Upload back to GPU
+
+            # Annotate edges if needed
+            if edges:
+                for edge in self.edge_names:
+                    node1, node2 = edge
+                    if node1 in nodes and node2 in nodes:
+                        x1 = frame_data[f"x_{node1}"].values[0]
+                        y1 = frame_data[f"y_{node1}"].values[0]
+                        x2 = frame_data[f"x_{node2}"].values[0]
+                        y2 = frame_data[f"y_{node2}"].values[0]
+                        if not (
+                            np.isnan(x1) or np.isnan(y1) or np.isnan(x2) or np.isnan(y2)
+                        ):
+                            img = gpu_img.download()  # CPU operations for drawing
+                            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+                            cv2.line(img, (x1, y1), (x2, y2), (0, 255, 255), 1)
+                            gpu_img.upload(img)  # Back to GPU
+
+            if save:
+                out.write(gpu_img.download())
+            else:
+                cv2.imshow("Annotated Video", gpu_img.download())
                 if cv2.waitKey(25) & 0xFF == ord("q"):
                     break
 
