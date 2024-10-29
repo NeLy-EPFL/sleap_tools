@@ -162,7 +162,7 @@ def main(yaml_file):
         prepare_videos(input_dir, use_gpu=True)
 
         # Run SLEAP tracking and annotation on preprocessed videos
-        run_sleap_on_preprocessed_videos(input_dir, model_path, make_annotated_video=False)
+        #run_sleap_on_preprocessed_videos(input_dir, model_path, make_annotated_video=False)
 
     # End timer for the entire process
     end_time = time.time()
