@@ -5,6 +5,11 @@ from pathlib import Path
 import subprocess
 import argparse
 
+# Template size
+template_width = 96
+template_height = 516
+
+
 # Function to track the duration of each section
 def timeit(func):
     def wrapper(*args, **kwargs):
@@ -16,21 +21,22 @@ def timeit(func):
 
     return wrapper
 
+
 # Wrapper function to run SLEAP commands in the `sleap_dev` environment
 def run_in_sleap_env(command, verbose=False):
     """Run a command using the sleap_dev environment."""
     sleap_env_command = ["conda", "run", "-n", "sleap_dev"] + command
-    result = subprocess.run(
-        sleap_env_command, capture_output=True, text=True
-    )
+    result = subprocess.run(sleap_env_command, capture_output=True, text=True)
     if verbose:
         print(f"Command: {' '.join(sleap_env_command)}")
         print(f"stdout: {result.stdout}")
         print(f"stderr: {result.stderr}")
     return result
 
+
 # Path to your SLEAP model
 model_path = "/mnt/upramdya_data/_Tracking_models/Sleap/mazerecorder/FlyTracking/FullBody/models/240910_140844.single_instance.n=421"
+
 
 @timeit
 def prepare_videos(input_dir, use_gpu=True):
@@ -39,9 +45,14 @@ def prepare_videos(input_dir, use_gpu=True):
         input_dir, exclude_keywords=["_preprocessed", "_annotated"], use_gpu=use_gpu
     )
 
+
 @timeit
 def run_sleap_on_preprocessed_videos(
-    preprocessed_dir, model_path, make_annotated_video=True, frame_batch_size=16, verbose=False
+    preprocessed_dir,
+    model_path,
+    make_annotated_video=True,
+    frame_batch_size=16,
+    verbose=False,
 ):
     """
     Run SLEAP on preprocessed videos and generate annotations.
@@ -131,7 +142,9 @@ def run_sleap_on_preprocessed_videos(
                         "--edges",
                         "--gpu",
                     ]
-                    result = subprocess.run(makevideo_command, capture_output=True, text=True, check=True)
+                    result = subprocess.run(
+                        makevideo_command, capture_output=True, text=True, check=True
+                    )
                     print(
                         f"Generated annotated video: {annotated_video_path} with result: {result.stdout}"
                     )
@@ -140,13 +153,18 @@ def run_sleap_on_preprocessed_videos(
                     print(f"Error generating annotated video: {e}")
                     print(f"Command output: {e.output}")
 
+
 def main():
     parser = argparse.ArgumentParser(description="Run SLEAP on preprocessed videos.")
     parser.add_argument(
-        "input", nargs="+", help="YAML file or list of directories containing preprocessed videos."
+        "input",
+        nargs="+",
+        help="YAML file or list of directories containing preprocessed videos.",
     )
     parser.add_argument(
-        "--verbose", action="store_true", help="Enable verbose mode for detailed logging."
+        "--verbose",
+        action="store_true",
+        help="Enable verbose mode for detailed logging.",
     )
     args = parser.parse_args()
 
@@ -178,18 +196,26 @@ def main():
             print(f"Directory does not exist: {input_dir}")
             continue
 
+        # Preprocess the videos
+        prepare_videos(input_dir, use_gpu=True)
+
         # Run SLEAP tracking and annotation on preprocessed videos
-        run_sleap_on_preprocessed_videos(input_dir, model_path, make_annotated_video=False, verbose=verbose)
+        run_sleap_on_preprocessed_videos(
+            input_dir, model_path, make_annotated_video=False, verbose=verbose
+        )
 
     # End timer for the entire process
     end_time = time.time()
-    print(f"Total time taken for the whole process: {end_time - start_time:.2f} seconds")
+    print(
+        f"Total time taken for the whole process: {end_time - start_time:.2f} seconds"
+    )
+
 
 if __name__ == "__main__":
     main()
 
 
-# # Example usage    
+# # Example usage
 # # Using a YAML file
 # python preprocess_and_track.py /path/to/config.yaml
 
